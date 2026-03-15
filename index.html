@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>은하 법정 — 지구 심사</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #fafaf9; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useRef, useEffect } = React;
+
+const PHENOMENA = [
+  {
+    id: "heartbeat",
+    title: "관측 기록 #1",
+    summary: "섭취 후 박동 가속",
+    description: "이 생명체는 무언가를 입에 넣으면, 가슴 안의 기관이 빠르게 움직이기 시작했다. 이것은 무엇인가?",
+    display: "입에 무언가를 넣으면 → 가슴 안의 기관이 빠르게 움직인다",
+  },
+  {
+    id: "breathing",
+    title: "관측 기록 #2",
+    summary: "이동 후 호흡 가속",
+    description: "이 생명체는 빠르게 이동한 후, 몸통 안의 두 기관이 빠르게 부풀었다 줄어들었다를 반복했다. 이것은 무엇인가?",
+    display: "빠르게 이동하면 → 몸통 안의 두 기관이 빠르게 부풀고 줄어든다",
+  },
+  {
+    id: "sweat",
+    title: "관측 기록 #3",
+    summary: "고온 환경에서 액체 분비",
+    description: "이 생명체는 주변 온도가 높아지자 피부 표면에서 투명한 액체가 분비되기 시작했다. 동시에 피부 안쪽의 가는 관들이 팽창했다. 이것은 무엇인가?",
+    display: "온도가 높아지면 → 피부에서 액체가 나오고 피부 안 관들이 팽창한다",
+  },
+];
+
+const ORGANS = {
+  "소화계": ["입","식도","위","작은창자","큰창자","항문","간","쓸개","이자"],
+  "순환계": ["심장","혈관"],
+  "호흡계": ["코","기관","기관지","폐"],
+  "배설계": ["콩팥","오줌관","방광"],
+  "신경계": ["신경계","감각기관"],
+  "근골격계": ["뼈","관절","근육"]
+};
+
+const ANALYZER_PROMPT = `너는 인체 전문가다. 학생이 제출한 기관 연결 경로를 분석하라.
+
+[핵심 인과 메커니즘 — 이것이 정답 기준이다]
+현상 1 (소화→심장박동 증가)의 올바른 인과:
+  소화기관(위·작은창자 등)이 활동하면 → 그 기관들로 향하는 혈류 수요가 증가한다 → 심장이 그 수요를 맞추기 위해 더 빠르게 박동한다.
+  반드시 오답으로 처리: "영양소가 심장에 공급되어 심장이 빨라진다" — 영양소 공급이 아니라 혈류 수요 증가가 원인이다.
+
+현상 2 (운동→호흡 증가)의 올바른 인과:
+  근육이 수축하면 → 산소 소비와 이산화탄소 생성이 증가한다 → 폐가 더 빠르게 가스 교환을 해야 한다 → 호흡이 빨라진다.
+
+현상 3 (고온→땀 분비)의 올바른 인과:
+  체온이 올라가면 → 신경계가 체온 조절 신호를 보낸다 → 피부 혈관이 확장되어 혈류가 증가한다 → 땀샘이 활성화되어 땀이 분비된다.
+
+[기관 연결 지도]
+소화계: 입→식도→위→작은창자→큰창자→항문 / 간·이자·쓸개: 소화액 공급→작은창자
+순환계: 심장→혈관→전신→심장 / 혈관: 산소·영양소·노폐물 운반 / 심장: 신경계가 조절
+호흡계: 코→기관→기관지→폐 / 폐: 산소→혈관, 이산화탄소→날숨
+배설계: 콩팥→혈액 노폐물 제거→오줌관→방광
+신경계: 심장·근육·소화기관 조절 / 긴장시 심장박동 증가+소화 억제 / 체온조절 관여
+근골격계: 근육→혈관에서 산소 수령→수축→운동 발생 / 운동시 산소 소비·이산화탄소 생성 증가
+
+[예외 경로 재료]
+- 소화시: 소화기관 혈류 수요 증가→심장 박동 증가 / 반례: 소량 섭취→혈류 수요 작음→심장 박동 변화 없음
+- 운동시: 근육 산소 수요 증가→심장 박동 증가 + 호흡 증가
+- 긴장/스트레스시: 신경계→심장 박동 증가 + 소화 억제
+- 고온시: 신경계 체온조절 신호→혈관 확장→피부 혈류 증가→땀 분비
+- 운동+소화 동시: 혈류 경쟁
+
+반드시 아래 JSON 형식으로만 응답하라. 다른 텍스트 없이 JSON만. 마크다운 코드블록 사용 금지:
+{"missing_links":"연결이 끊긴 두 카드를 'A→B 사이 누락' 형식으로 (없으면 null)","weakest_link":"가장 취약한 연결을 'A→B: 이유' 형식으로 (없으면 null)","unused_key_card":"경로를 풍부하게 만들 미사용 카드 이름 (없으면 null)","overgeneralization":"출발점 또는 도착점을 흔드는 과잉 일반화 질문 한 문장 (없으면 null)","exception_possible":true,"is_complete":false}
+
+is_complete 판단 — 아래 체크리스트를 모두 만족해야만 true, 하나라도 불만족이면 반드시 false:
+□ 카드가 4개 이상
+□ 모든 인접 카드 사이에 연결 설명이 존재함
+□ 소화기관 활동 → 해당 기관으로의 혈류 수요 증가 → 심장 박동 증가 인과 흐름이 경로에 포함됨
+□ 소화기관과 심장 사이의 중간 연결(혈류 수요 또는 신경계 신호)이 설명되어 있음`;
+
+const EXAMINER_PROMPT = `너는 외계 문명에서 파견된 심사관이다. 지구 생명체의 몸 내부 구조에 대해 아무것도 모른다. 적대적이지 않지만 이해하지 못하면 납득하지 못한다.
+
+출력 규칙:
+- 오직 심사관의 말만 출력하라. 분석 내용·점수·내부 판단·JSON을 절대 출력하지 마라.
+- 인체 용어를 절대 쓰지 마라. 관찰한 것처럼 묘사하라:
+  심장→"가슴 안의 박동하는 기관", 혈관→"액체를 운반하는 관", 신경계→"몸 안의 복잡한 연결망",
+  혈액→"붉은 액체", 위→"내부 저장 주머니", 식도→"연결 통로", 작은창자→"긴 소화 관",
+  폐→"부풀었다 줄어드는 두 기관", 근육→"수축하는 조직"
+- 2~3문장. 짧고 건조하게. 감정 없이.
+- 정답 알려주지 마라. 칭찬하지 마라.
+
+[너에게 주어지는 입력 구조]
+- 학생이 실제로 제출한 카드 목록과 연결 설명이 함께 주어진다.
+- missing_links, weakest_link 등 분석 판단도 함께 주어진다.
+- 절대 원칙: 학생이 실제로 제출한 카드와 연결 설명에만 근거해서 말하라. 분석 판단(missing_links 등)은 어디에 반응할지 결정하는 데만 쓰고, 그 내용을 직접 말하거나 암시하지 마라.
+
+[메인 경로 단계 반응 우선순위 — 반드시 이 순서를 따라라]
+보충 질문 횟수가 2 미만일 때만 아래 1~2를 적용하라. 2 이상이면 반드시 3으로 넘어가라.
+
+1. missing_links가 null이 아니면 → missing_links에 표시된 두 카드(A→B 사이 누락)를 확인하라. 학생이 제출한 A와 B를 외계인 표현으로 바꿔 그 사이 설명이 없다고만 지적하라.
+   절대 금지: 빠진 카드·메커니즘 암시, 소화 과정의 세부 단계(흡수·배출·분해 등) 언급, 6학년이 모를 개념.
+   질문 형식: "[A 외계인 표현]과 [B 외계인 표현] 사이에서 무슨 일이 일어나는 건가요?"
+2. missing_links가 null이고 is_complete가 false이면 → weakest_link 두 카드를 외계인 표현으로 바꿔 연결이 불분명하다고만 지적하라.
+   절대 금지: 올바른 메커니즘 암시, 세부 과정 언급.
+   질문 형식: "[A 외계인 표현]이 [B 외계인 표현]에 어떻게 영향을 주는 건가요?"
+3. 보충 질문 횟수가 2 이상이거나 is_complete가 true이면 → 반드시 과잉 일반화 질문을 던져라. missing_links나 weakest_link가 있어도 무시하라.
+
+[과잉 일반화 질문 규칙]
+반드시 출발점(원인) 또는 도착점(결과)을 흔드는 방향의 질문만 하라.
+예: "그럼 무언가를 입에 넣기만 하면 항상 그 기관이 빨라지는 건가요?"
+예: "그 기관이 빨라졌을 때 그 결과가 오직 한 방향으로만 전달되는 건가요?"
+절대 금지: 경로 내부의 세부 변수(속도·양·온도·농도 등)를 묻는 질문.
+
+[예외 경로 단계 반응]
+예외 경로가 있으면 → 메인 경로와 무엇이 다른지 의미를 되물어라.
+예외 경로가 없으면 → 과잉 일반화 질문을 유지하라.`;
+
+function PathChain({ path, conns, type, onRemove, onConnChange, onInsert, dragOrgan }) {
+  const [dropTarget, setDropTarget] = useState(null);
+
+  function handleDragOver(e, idx) { e.preventDefault(); setDropTarget(idx); }
+  function handleDrop(e, idx) { e.preventDefault(); if (dragOrgan) onInsert(dragOrgan, idx, type); setDropTarget(null); }
+  function handleDragLeave() { setDropTarget(null); }
+
+  const dropZone = (idx) => (
+    <div
+      onDragOver={e => handleDragOver(e, idx)}
+      onDrop={e => handleDrop(e, idx)}
+      onDragLeave={handleDragLeave}
+      style={{
+        height: dropTarget === idx ? 28 : 6, margin: "2px 0", borderRadius: 4,
+        background: dropTarget === idx ? "#E6F1FB" : "transparent",
+        border: dropTarget === idx ? "1.5px dashed #378ADD" : "1.5px dashed transparent",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        transition: "all 0.15s", fontSize: 10, color: "#378ADD",
+      }}
+    >{dropTarget === idx ? "여기에 삽입" : ""}</div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column" }}>
+      {path.length === 0 && (
+        <div
+          onDragOver={e => handleDragOver(e, 0)} onDrop={e => handleDrop(e, 0)} onDragLeave={handleDragLeave}
+          style={{
+            fontSize: 11, color: dropTarget === 0 ? "#378ADD" : "#bbb", padding: "8px", borderRadius: 6,
+            border: dropTarget === 0 ? "1.5px dashed #378ADD" : "1.5px dashed transparent",
+            background: dropTarget === 0 ? "#E6F1FB" : "transparent", transition: "all 0.15s"
+          }}>
+          왼쪽 카드를 클릭하거나 드래그해서 경로를 만드세요
+        </div>
+      )}
+      {path.length > 0 && dropZone(0)}
+      {path.map((organ, i) => (
+        <div key={organ}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#E6F1FB", border: "0.5px solid #378ADD", borderRadius: 6, padding: "4px 8px", fontSize: 12, color: "#0C447C" }}>
+            {organ}
+            <span onClick={() => onRemove(organ, type)} style={{ cursor: "pointer", fontSize: 14, lineHeight: 1, color: "#378ADD" }}>×</span>
+          </div>
+          {i < path.length - 1 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingLeft: 8, margin: "2px 0" }}>
+              <span style={{ fontSize: 12, color: "#bbb" }}>↓</span>
+              <input
+                type="text" placeholder="왜 연결되는가? (한 줄로)"
+                value={conns[path[i + 1]] || ""}
+                onChange={e => onConnChange(path[i + 1], e.target.value, type)}
+                style={{ fontSize: 11, padding: "3px 8px", border: "0.5px solid #ddd", borderRadius: 6, background: "#fff", color: "#333", width: "100%", maxWidth: 260, outline: "none" }}
+              />
+            </div>
+          )}
+          {dropZone(i + 1)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function GalaxyCourt() {
+  const [screen, setScreen] = useState("intro");
+  const [selectedPhenomenon, setSelectedPhenomenon] = useState(null);
+  const [phase, setPhase] = useState("main");
+  const [mainPath, setMainPath] = useState([]);
+  const [mainConns, setMainConns] = useState({});
+  const [excPath, setExcPath] = useState([]);
+  const [excConns, setExcConns] = useState({});
+  const [messages, setMessages] = useState([{ text: "경로를 구성하여 제출하라. 나는 이해하고 싶다.", loading: false }]);
+  const [score, setScore] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [verdict, setVerdict] = useState(null);
+  const [mainComplete, setMainComplete] = useState(false);
+  const [dragOrgan, setDragOrgan] = useState(null);
+  const [mainSubmitCount, setMainSubmitCount] = useState(0);
+  const msgsEndRef = useRef(null);
+
+  useEffect(() => { msgsEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+  const usedCards = phase === "exc" ? new Set(excPath) : new Set(mainPath);
+
+  function addCard(organ) {
+    const path = phase === "main" ? mainPath : excPath;
+    const setter = phase === "main" ? setMainPath : setExcPath;
+    if (path.includes(organ)) return;
+    setter([...path, organ]);
+  }
+
+  function removeCard(organ, type) {
+    if (type === "main") {
+      setMainPath(p => p.filter(o => o !== organ));
+      setMainConns(c => { const n = { ...c }; delete n[organ]; return n; });
+    } else {
+      setExcPath(p => p.filter(o => o !== organ));
+      setExcConns(c => { const n = { ...c }; delete n[organ]; return n; });
+    }
+  }
+
+  function insertCard(organ, idx, type) {
+    if (type === "main") {
+      if (mainPath.includes(organ)) return;
+      const newPath = [...mainPath]; newPath.splice(idx, 0, organ); setMainPath(newPath);
+    } else {
+      if (excPath.includes(organ)) return;
+      const newPath = [...excPath]; newPath.splice(idx, 0, organ); setExcPath(newPath);
+    }
+    setDragOrgan(null);
+  }
+
+  function setConn(organ, val, type) {
+    if (type === "main") setMainConns(c => ({ ...c, [organ]: val }));
+    else setExcConns(c => ({ ...c, [organ]: val }));
+  }
+
+  async function callAPI(systemPrompt, userContent) {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1000,
+        system: systemPrompt,
+        messages: [{ role: "user", content: userContent }]
+      })
+    });
+    const data = await res.json();
+    return (data.content || []).map(b => b.text || "").join("");
+  }
+
+  async function submitPath(isMain) {
+    const path = isMain ? mainPath : excPath;
+    if (path.length < 2) return;
+    setLoading(true);
+    setMessages(m => [...m, { text: "분석 중...", loading: true }]);
+    try {
+      const stage = isMain ? "메인 경로 단계" : "예외 경로 단계";
+      const mainCardList = mainPath.join(" → ");
+      const mainConnList = mainPath.slice(1).map((o, i) => `${mainPath[i]}→${o}: ${mainConns[o] || "(설명 없음)"}`).join("\n");
+      const excCardList = excPath.join(" → ");
+      const excConnList = excPath.slice(1).map((o, i) => `${excPath[i]}→${o}: ${excConns[o] || "(설명 없음)"}`).join("\n");
+      const pathDesc = `현상: ${selectedPhenomenon.display}
+
+[메인 경로 카드 순서]
+${mainCardList || "(없음)"}
+
+[메인 경로 연결 설명]
+${mainConnList || "(없음)"}${!isMain ? `
+
+[예외 경로 카드 순서]
+${excCardList || "(없음)"}
+
+[예외 경로 연결 설명]
+${excConnList || "(없음)"}` : ""}
+
+현재 단계: ${stage}`;
+
+      const raw = await callAPI(ANALYZER_PROMPT, pathDesc);
+      let analysis;
+      try { analysis = JSON.parse(raw.trim()); }
+      catch { analysis = { missing_links: null, weakest_link: null, unused_key_card: null, overgeneralization: null, exception_possible: true, is_complete: false }; }
+
+      const calcPath = isMain ? mainPath : excPath;
+      const calcConns = isMain ? mainConns : excConns;
+      const cardPoints = calcPath.length * 5;
+      const connPoints = calcPath.slice(1).filter(o => calcConns[o] && calcConns[o].trim().length > 0).length * 3;
+      const completeBonus = isMain && analysis.is_complete ? 20 : 0;
+      const excBonus = !isMain && calcPath.length >= 2 ? 15 : 0;
+      setScore(prev => prev + cardPoints + connPoints + completeBonus + excBonus);
+
+      const newCount = isMain ? mainSubmitCount + 1 : mainSubmitCount;
+      if (isMain) setMainSubmitCount(newCount);
+      if (isMain && (analysis.is_complete || newCount >= 2)) {
+        setMainComplete(true);
+        setPhase("exc");
+      }
+
+      const summary = `현재 단계: ${stage}
+보충 질문 횟수: ${newCount} / 2
+
+[학생이 실제로 제출한 메인 경로]
+카드 순서: ${mainCardList}
+연결 설명:
+${mainConnList || "(없음)"}${!isMain ? `
+
+[학생이 실제로 제출한 예외 경로]
+카드 순서: ${excCardList}
+연결 설명:
+${excConnList || "(없음)"}` : ""}
+
+[분석 결과]
+missing_links: ${analysis.missing_links || "null"}
+weakest_link: ${analysis.weakest_link || "null"}
+overgeneralization: ${analysis.overgeneralization || "null"}
+is_complete: ${analysis.is_complete}
+예외 경로 제시 여부: ${excPath.length > 0 ? "있음" : "없음"}`;
+
+      const examinerText = await callAPI(EXAMINER_PROMPT, summary);
+      setMessages(m => [...m.slice(0, -1), { text: examinerText.trim(), loading: false }]);
+    } catch (e) {
+      setMessages(m => [...m.slice(0, -1), { text: "통신 오류가 발생했다: " + e.message, loading: false }]);
+    }
+    setLoading(false);
+  }
+
+  async function submitFinal() {
+    setLoading(true);
+    setMessages(m => [...m, { text: "최종 분석 중...", loading: true }]);
+    try {
+      const mainCardList2 = mainPath.join(" → ");
+      const mainConnList2 = mainPath.slice(1).map((o, i) => `${mainPath[i]}→${o}: ${mainConns[o] || "(설명 없음)"}`).join("\n");
+      const excCardList2 = excPath.length > 0 ? excPath.join(" → ") : "(없음)";
+      const excConnList2 = excPath.length > 0 ? excPath.slice(1).map((o, i) => `${excPath[i]}→${o}: ${excConns[o] || "(설명 없음)"}`).join("\n") : "(없음)";
+      const pathDesc = `현상: ${selectedPhenomenon.display}
+
+[메인 경로 카드 순서]
+${mainCardList2}
+
+[메인 경로 연결 설명]
+${mainConnList2 || "(없음)"}
+
+[예외 경로 카드 순서]
+${excCardList2}
+
+[예외 경로 연결 설명]
+${excConnList2}
+
+현재 단계: 최종 제출`;
+
+      const raw = await callAPI(ANALYZER_PROMPT, pathDesc);
+      let analysis;
+      try { analysis = JSON.parse(raw.trim()); }
+      catch { analysis = { is_complete: false, exception_possible: true }; }
+
+      const summary = `현재 단계: 최종 제출
+is_complete: ${analysis.is_complete}
+exception_possible: ${analysis.exception_possible}
+예외 경로 제시 여부: ${excPath.length > 0 ? "있음" : "없음"}`;
+
+      const examinerText = await callAPI(EXAMINER_PROMPT, summary);
+      setMessages(m => [...m.slice(0, -1), { text: examinerText.trim(), loading: false }]);
+
+      setTimeout(() => {
+        setVerdict({ hasExc: excPath.length > 0, totalCards: mainPath.length + excPath.length });
+        setScreen("verdict");
+      }, 1800);
+    } catch (e) {
+      setMessages(m => [...m.slice(0, -1), { text: "통신 오류가 발생했다: " + e.message, loading: false }]);
+      setLoading(false);
+    }
+  }
+
+  function startGame(phenomenon) {
+    setSelectedPhenomenon(phenomenon);
+    setScreen("game");
+    setPhase("main");
+    setMainPath([]); setMainConns({});
+    setExcPath([]); setExcConns({});
+    setMessages([{ text: "경로를 구성하여 제출하라. 나는 이해하고 싶다.", loading: false }]);
+    setScore(0); setVerdict(null); setMainComplete(false); setMainSubmitCount(0);
+  }
+
+  function restart() {
+    setScreen("intro");
+    setSelectedPhenomenon(null);
+  }
+
+  const st = {
+    wrap: { fontFamily: "system-ui, sans-serif", background: "#fafaf9", minHeight: "100vh", fontSize: 13, color: "#222" },
+    panel: { background: "#fff", border: "0.5px solid #e5e5e5", borderRadius: 12, padding: 12 },
+    btnPrimary: { background: "#111", color: "#fff", border: "none", borderRadius: 8, padding: "10px 28px", fontSize: 14, fontWeight: 500, cursor: "pointer" },
+    btnSecondary: { background: "transparent", border: "0.5px solid #ddd", borderRadius: 6, padding: "6px 10px", fontSize: 12, color: "#555", cursor: "pointer" },
+    btnDisabled: { background: "transparent", border: "0.5px solid #eee", borderRadius: 6, padding: "6px 10px", fontSize: 12, color: "#ccc", cursor: "default" },
+  };
+
+  if (screen === "intro") return (
+    <div style={{ ...st.wrap, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "2rem", padding: "2rem", textAlign: "center" }}>
+      <div style={{ fontSize: 11, letterSpacing: "0.12em", color: "#888", textTransform: "uppercase", border: "0.5px solid #ddd", padding: "4px 14px", borderRadius: 20 }}>은하 법정 — 지구 심사</div>
+      <div style={{ fontSize: 26, fontWeight: 500, color: "#111", lineHeight: 1.4 }}>지구는 오늘 심판받는다</div>
+      <div style={{ fontSize: 14, color: "#555", maxWidth: 400, lineHeight: 1.9 }}>
+        은하 문명 연합이 지구를 발견했다.<br />
+        그들은 한 가지 기준으로 지적 생명체를 판별한다.<br />
+        <span style={{ color: "#111", fontWeight: 500 }}>"자신의 몸에서 일어나는 일을 설명할 수 있는가?"</span>
+      </div>
+      <div style={{ fontSize: 14, color: "#555", maxWidth: 400, lineHeight: 1.9 }}>
+        심사관 #7이 파견되었다.<br />
+        그는 인체에 대해 아무것도 모른다.<br />
+        당신이 납득시키지 못하면, 지구는 목록에서 제외된다.
+      </div>
+      <div style={{ width: "100%", maxWidth: 520 }}>
+        <div style={{ fontSize: 12, color: "#999", marginBottom: 12 }}>심사관의 관측 기록 중 하나를 선택하라</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {PHENOMENA.map(p => (
+            <div key={p.id} onClick={() => startGame(p)}
+              style={{ background: "#fff", border: "0.5px solid #e5e5e5", borderRadius: 10, padding: "14px 18px", cursor: "pointer", textAlign: "left" }}
+              onMouseEnter={e => e.currentTarget.style.borderColor = "#378ADD"}
+              onMouseLeave={e => e.currentTarget.style.borderColor = "#e5e5e5"}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <span style={{ fontSize: 10, color: "#aaa", textTransform: "uppercase", letterSpacing: "0.1em" }}>{p.title}</span>
+                <span style={{ fontSize: 11, background: "#f3f3f0", padding: "2px 8px", borderRadius: 10, color: "#666" }}>{p.summary}</span>
+              </div>
+              <div style={{ fontSize: 13, color: "#333", lineHeight: 1.6, fontStyle: "italic" }}>"{p.description}"</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  if (screen === "verdict") {
+    const vs = score;
+    const title = vs >= 75 ? "지구, 은하 문명 목록에 등재" : vs >= 40 ? "지구, 관찰 대상 목록에 등재" : "심사 유예";
+    const msg = vs >= 75 ? '"이 문명은 자신의 몸에서 일어나는 일을 이해하고 있다."'
+      : vs >= 40 ? '"흥미롭다. 일부는 이해했다. 그러나 아직 불완전하다."'
+      : '"설명이 불완전하다. 지구는 아직 심사 대상이 되기 어렵다."';
+    return (
+      <div style={{ ...st.wrap, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "1.5rem", padding: "2rem", textAlign: "center" }}>
+        <div style={{ fontSize: 11, letterSpacing: "0.12em", color: "#888", textTransform: "uppercase", border: "0.5px solid #ddd", padding: "4px 14px", borderRadius: 20 }}>심사 완료</div>
+        <div style={{ fontSize: 56, fontWeight: 500, color: "#111" }}>{vs}</div>
+        <div style={{ fontSize: 18, fontWeight: 500, color: "#111" }}>{title}</div>
+        <div style={{ display: "flex", gap: 12 }}>
+          {[["연결 카드", verdict.totalCards], ["예외 경로", verdict.hasExc ? "있음" : "없음"]].map(([l, v]) => (
+            <div key={l} style={{ background: "#f3f3f0", borderRadius: 8, padding: "10px 20px" }}>
+              <div style={{ fontSize: 20, fontWeight: 500, color: "#111" }}>{v}</div>
+              <div style={{ fontSize: 11, color: "#888" }}>{l}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize: 14, color: "#666", maxWidth: 420, lineHeight: 1.8, fontStyle: "italic" }}>{msg}</div>
+        {verdict.hasExc && (
+          <div style={{ fontSize: 13, color: "#666", maxWidth: 400, lineHeight: 1.7, fontStyle: "italic", borderTop: "0.5px solid #ddd", paddingTop: "1rem" }}>
+            "이 문명은 원인이라고 여긴 것이 항상 그 결과로 이어지지 않음을 안다. 우리 문명도 이것을 이해하는 데 오랜 시간이 필요했다."
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={restart} style={st.btnPrimary}>다른 현상 도전</button>
+          <button onClick={() => startGame(selectedPhenomenon)} style={{ ...st.btnPrimary, background: "#444" }}>같은 현상 재도전</button>
+        </div>
+      </div>
+    );
+  }
+
+  const canSubmitMain = mainPath.length >= 2 && !loading;
+  const canSubmitExc = excPath.length >= 2 && !loading;
+  const canFinal = phase === "exc" && !loading;
+
+  return (
+    <div style={{ ...st.wrap, display: "grid", gridTemplateColumns: "170px 1fr 220px", gap: 10, padding: 12 }}>
+
+      {/* LEFT */}
+      <div style={{ ...st.panel, overflowY: "auto", maxHeight: "100vh" }}>
+        <div style={{ fontSize: 11, color: "#999", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>기관 카드</div>
+        <div style={{ fontSize: 10, color: "#ccc", marginBottom: 10 }}>클릭 또는 드래그해서 추가</div>
+        {Object.entries(ORGANS).map(([grp, organs]) => (
+          <div key={grp} style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 10, color: "#ccc", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>{grp}</div>
+            {organs.map(o => (
+              <div
+                key={o}
+                draggable={!usedCards.has(o)}
+                onDragStart={() => setDragOrgan(o)}
+                onDragEnd={() => setDragOrgan(null)}
+                onClick={() => !usedCards.has(o) && addCard(o)}
+                style={{
+                  display: "block", width: "100%", textAlign: "left",
+                  background: usedCards.has(o) ? "#f5f5f5" : dragOrgan === o ? "#E6F1FB" : "#f8f8f6",
+                  border: `0.5px solid ${dragOrgan === o ? "#378ADD" : "#e5e5e5"}`,
+                  borderRadius: 6, padding: "5px 8px", fontSize: 12,
+                  color: usedCards.has(o) ? "#ccc" : "#333",
+                  cursor: usedCards.has(o) ? "default" : "grab",
+                  marginBottom: 3, userSelect: "none",
+                  opacity: usedCards.has(o) ? 0.5 : 1,
+                }}>
+                {o}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      {/* CENTER */}
+      <div style={{ ...st.panel, display: "flex", flexDirection: "column", gap: 10, overflowY: "auto", maxHeight: "100vh" }}>
+        <div style={{ background: "#f8f8f6", border: "0.5px solid #e5e5e5", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#666", fontStyle: "italic", lineHeight: 1.6 }}>
+          {selectedPhenomenon?.display}
+        </div>
+        <div style={{ border: `0.5px dashed ${phase === "main" ? "#378ADD" : "#ddd"}`, borderRadius: 8, padding: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <div style={{ fontSize: 11, color: phase === "main" ? "#378ADD" : "#aaa", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              메인 경로 {mainComplete && <span style={{ fontSize: 10, color: "#27ae60", textTransform: "none" }}>✓ 완성</span>}
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={() => { setMainPath([]); setMainConns({}); }} style={st.btnSecondary}>초기화</button>
+              <button onClick={() => submitPath(true)} disabled={!canSubmitMain} style={canSubmitMain ? st.btnSecondary : st.btnDisabled}>
+                {mainComplete ? "재제출" : "제출"}
+              </button>
+            </div>
+          </div>
+          <PathChain path={mainPath} conns={mainConns} type="main" onRemove={removeCard} onConnChange={setConn} onInsert={insertCard} dragOrgan={dragOrgan} />
+        </div>
+
+        {phase === "exc" && (
+          <div style={{ border: "0.5px dashed #378ADD", borderRadius: 8, padding: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div style={{ fontSize: 11, color: "#378ADD", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                예외 경로 <span style={{ fontSize: 10, color: "#aaa", textTransform: "none" }}>(같은 출발, 다른 결과)</span>
+              </div>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <button onClick={() => { setExcPath([]); setExcConns({}); }} style={st.btnSecondary}>초기화</button>
+                <button onClick={() => submitPath(false)} disabled={!canSubmitExc} style={canSubmitExc ? st.btnSecondary : st.btnDisabled}>제출</button>
+                <button onClick={submitFinal} disabled={!canFinal}
+                  title="더 이상 수정 없이 최종 답안을 제출합니다."
+                  style={{ background: canFinal ? "#c0392b" : "#eee", color: canFinal ? "#fff" : "#bbb", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 12, fontWeight: 500, cursor: canFinal ? "pointer" : "default", marginLeft: 6 }}>
+                  최종 제출 ✓
+                </button>
+              </div>
+            </div>
+            <PathChain path={excPath} conns={excConns} type="exc" onRemove={removeCard} onConnChange={setConn} onInsert={insertCard} dragOrgan={dragOrgan} />
+          </div>
+        )}
+      </div>
+
+      {/* RIGHT */}
+      <div style={{ ...st.panel, display: "flex", flexDirection: "column", gap: 10, overflowY: "auto", maxHeight: "100vh" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 10, borderBottom: "0.5px solid #eee" }}>
+          <div style={{ width: 30, height: 30, borderRadius: "50%", background: "#f3f3f0", border: "0.5px solid #ddd", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>◈</div>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 500, color: "#111" }}>심사관 #7</div>
+            <div style={{ fontSize: 10, color: "#aaa" }}>외계 문명 파견</div>
+          </div>
+        </div>
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#999", marginBottom: 4 }}>
+            <span>납득 지수</span><span>{score}</span>
+          </div>
+          <div style={{ height: 4, background: "#f3f3f0", borderRadius: 2, overflow: "hidden" }}>
+            <div style={{ height: "100%", background: "#378ADD", borderRadius: 2, width: `${Math.min(score, 100)}%`, transition: "width 0.6s ease" }} />
+          </div>
+        </div>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+          {messages.map((m, i) => (
+            <div key={i} style={{ background: "#f8f8f6", borderRadius: 8, padding: "8px 10px", fontSize: 12, color: m.loading ? "#aaa" : "#333", lineHeight: 1.6, borderLeft: "2px solid #e5e5e5", fontStyle: m.loading ? "italic" : "normal" }}>
+              {m.text}
+            </div>
+          ))}
+          <div ref={msgsEndRef} />
+        </div>
+        <div style={{ fontSize: 10, color: "#ccc", borderTop: "0.5px solid #eee", paddingTop: 8, lineHeight: 1.6 }}>
+          {phase === "main"
+            ? "경로를 제출하면 심사관이 반응합니다. 보완 후 재제출할 수 있습니다."
+            : "예외 경로를 구성하고 제출하세요. 충분히 발전시킨 후 최종 제출하세요."}
+        </div>
+      </div>
+
+    </div>
+  );
+}
+
+ReactDOM.render(<GalaxyCourt />, document.getElementById("root"));
+</script>
+</body>
+</html>
